@@ -1,7 +1,25 @@
-use std::{fs, io::Write, path::Path};
+use std::{
+    fs,
+    io::{Read, Write},
+    path::Path,
+};
 
 pub struct MemoryCgroup {
-    name: String,
+    path: String,
+}
+
+pub enum MemoryField {
+    PROCS,
+    MEMORY_LIMIT,
+}
+
+impl MemoryField {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MemoryField::PROCS => "/cgroup.procs",
+            MemoryField::MEMORY_LIMIT => "/memory.limit_in_bytes",
+        }
+    }
 }
 
 impl MemoryCgroup {
@@ -13,7 +31,7 @@ impl MemoryCgroup {
             return Err("Cgroup does not exists");
         }
 
-        Ok(MemoryCgroup { name: path })
+        Ok(MemoryCgroup { path })
     }
 
     pub fn create(parent: &str, name: &str) -> Result<MemoryCgroup, &'static str> {
@@ -25,14 +43,12 @@ impl MemoryCgroup {
             return Err("Failed to create new memory cgroup");
         }
 
-        Ok(MemoryCgroup { name: path })
+        Ok(MemoryCgroup { path })
     }
 
     fn write_to_file(&self, filename: &str, value: &str) -> Result<(), &'static str> {
-        let mut path = String::from(&self.name);
+        let mut path = String::from(&self.path);
         path.push_str(filename);
-
-        println!("path {} value: {}", path, value);
 
         let mut file = match fs::File::create(path) {
             Ok(f) => f,
@@ -46,11 +62,33 @@ impl MemoryCgroup {
         Ok(())
     }
 
-    pub fn add_pid(&self, pid: u64) -> Result<(), &'static str> {
-        self.write_to_file("/cgroup.procs", &pid.to_string())
+    fn read_from_file(&self, filename: &str) -> Result<String, &'static str> {
+        let mut path = String::from(&self.path);
+        path.push_str(filename);
+
+        let mut file = match fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => return Err("failed to create file"),
+        };
+
+        let mut result: String = String::new();
+
+        if file.read_to_string(&mut result).is_err() {
+            return Err("Failed to read file contents");
+        }
+
+        Ok(result)
     }
 
-    pub fn set_memory_limit(&self, limit: u64) -> Result<(), &'static str> {
-        self.write_to_file("/memory.limit_in_bytes", &limit.to_string())
+    pub fn write_value<T: std::string::ToString>(
+        &self,
+        field: MemoryField,
+        value: T,
+    ) -> Result<(), &'static str> {
+        self.write_to_file(field.as_str(), &value.to_string())
+    }
+
+    pub fn read_value(&self, field: MemoryField) -> Result<String, &'static str> {
+        self.read_from_file(field.as_str())
     }
 }
