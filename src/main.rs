@@ -1,8 +1,13 @@
 mod cgroup;
-use cgroup::Memory;
-use cgroup::MemoryField;
+use caps::errors::CapsError;
+use caps::CapSet;
 use std::env;
+use std::io;
+use std::io::Stderr;
+use std::io::Stdout;
 use std::process;
+use std::process::Command;
+use std::process::Stdio;
 
 use crate::cgroup::Cgroup;
 
@@ -70,8 +75,33 @@ fn parse_arguments() -> Arguments {
     }
 }
 
+fn drop_capabilities() -> Result<(), CapsError> {
+    caps::clear(None, CapSet::Bounding)?;
+    caps::clear(None, CapSet::Inheritable)?;
+
+    Ok(())
+}
+
 fn main() {
     let args: Arguments = parse_arguments();
+    println!("[-] Dropping capabalities...");
 
-    println!("{:?}", args);
+    drop_capabilities().expect("Failed to drop capabilities");
+
+    println!("[-] Running the binary...");
+
+    let mut proc = Command::new(args.binary_name)
+        .args(&args.binary_args)
+        .stdout(Stdio::inherit())
+        .stdin(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("Failed to execute process");
+
+    let exit = proc.wait().expect("Failed to wait");
+
+    println!(
+        "process exited {}",
+        exit.code().expect("Failed to retrieve exit code")
+    );
 }
