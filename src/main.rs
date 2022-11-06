@@ -1,13 +1,15 @@
 mod cgroup;
 use caps::errors::CapsError;
 use caps::CapSet;
+use fs_extra::dir::CopyOptions;
 use std::env;
-use std::io;
-use std::io::Stderr;
-use std::io::Stdout;
+use std::fs;
+use std::os::unix;
+use std::path::PathBuf;
 use std::process;
 use std::process::Command;
 use std::process::Stdio;
+use tempdir::TempDir;
 
 use crate::cgroup::Cgroup;
 
@@ -82,15 +84,77 @@ fn drop_capabilities() -> Result<(), CapsError> {
     Ok(())
 }
 
+fn create_environment(
+    binary: &str,
+    workdir: Option<&String>,
+    rootfs: Option<&String>,
+) -> Result<String, &'static str> {
+    // Create a temp dir to be used as root file system
+    let tmp_dir: TempDir = match TempDir::new("moulinette") {
+        Ok(dir) => dir,
+        Err(_) => return Err("Failed to create temp directory"),
+    };
+
+    let binary_path: PathBuf = PathBuf::from(binary);
+
+    let binary_filename = match binary_path.file_name() {
+        Some(f) => f,
+        None => return Err("Invalid binary name"),
+    };
+
+    let binary_cpy_path = tmp_dir.path().join(binary_filename);
+
+    // Move everything to the directory
+    if let Err(e) = fs::copy(binary, &binary_cpy_path) {
+        println!("{}", e);
+        return Err("Failed to copy binary to tmp fs");
+    }
+
+    if let Some(w) = workdir {
+        if fs_extra::dir::copy(w, tmp_dir.path(), &CopyOptions::default()).is_err() {
+            return Err("Failed to copy rootfs");
+        }
+    }
+
+    if let Some(r) = rootfs {
+        if fs_extra::dir::copy(r, tmp_dir.path(), &CopyOptions::default()).is_err() {
+            return Err("Failed to copy workdir");
+        }
+    }
+
+    // chroot the directory
+    if unix::fs::chroot(tmp_dir.path()).is_err() {
+        return Err("Failed to chroot tmp directory");
+    }
+
+    if std::env::set_current_dir("/").is_err() {
+        return Err("Failed to change env dir");
+    }
+
+    Ok(String::from(binary_filename.to_str().unwrap()))
+}
+
 fn main() {
     let args: Arguments = parse_arguments();
-    println!("[-] Dropping capabalities...");
+
+    println!("[*] Creating environment directory");
+
+    let binary_filename: String = create_environment(
+        &args.binary_name,
+        args.workdir.as_ref(),
+        args.rootfs.as_ref(),
+    )
+    .expect("Failed to create environment");
+
+    println!("[*] Dropping capabalities...");
 
     drop_capabilities().expect("Failed to drop capabilities");
 
-    println!("[-] Running the binary...");
+    println!("[*] Running the binary...");
 
-    let mut proc = Command::new(args.binary_name)
+    let exec_path: PathBuf = PathBuf::new().join("/").join(binary_filename);
+
+    let mut proc = Command::new(&exec_path)
         .args(&args.binary_args)
         .stdout(Stdio::inherit())
         .stdin(Stdio::inherit())
