@@ -1,6 +1,6 @@
 CC?=gcc
 CFLAGS=-Werror -Wextra -Wall -pedantic -std=c99
-LFLAGS= -static
+LFLAGS= -lcap -static
 
 OBJECT=main.o
 TARGET=test
@@ -8,7 +8,7 @@ TARGET=test
 all: $(TARGET)
 
 $(TARGET): $(OBJECT)
-	$(CC) $(LFLAGS) $(OBJECT) -o $(TARGET)
+	$(CC) $(OBJECT) -o $(TARGET) $(LFLAGS) 
 
 run: $(TARGET)
 	./$(TARGET)
