@@ -1,4 +1,6 @@
 mod cgroup;
+use anyhow::anyhow;
+use anyhow::Result;
 use caps::errors::CapsError;
 use caps::CapSet;
 use fs_extra::dir::CopyOptions;
@@ -43,8 +45,8 @@ fn parse_arguments() -> Arguments {
     let mut expecting_rootfs: bool = false;
     let mut is_binary_name_set: bool = false;
 
-    for i in 1..args.len() {
-        match args[i].as_str() {
+    for item in args.iter().skip(1) {
+        match item.as_str() {
             "-v" => expecting_workdir = true,
             "-I" => expecting_rootfs = true,
             s => {
@@ -70,10 +72,10 @@ fn parse_arguments() -> Arguments {
     }
 
     Arguments {
-        binary_name: binary_name,
-        binary_args: binary_args,
-        workdir: workdir,
-        rootfs: rootfs,
+        binary_name,
+        binary_args,
+        workdir,
+        rootfs,
     }
 }
 
@@ -88,48 +90,34 @@ fn create_environment(
     binary: &str,
     workdir: Option<&String>,
     rootfs: Option<&String>,
-) -> Result<String, &'static str> {
+) -> Result<String> {
     // Create a temp dir to be used as root file system
-    let tmp_dir: TempDir = match TempDir::new("moulinette") {
-        Ok(dir) => dir,
-        Err(_) => return Err("Failed to create temp directory"),
-    };
+    let tmp_dir: TempDir = TempDir::new("moulinette")?;
 
     let binary_path: PathBuf = PathBuf::from(binary);
 
     let binary_filename = match binary_path.file_name() {
-        Some(f) => f,
-        None => return Err("Invalid binary name"),
+        Some(b) => b,
+        None => return Err(anyhow!("Failed to get binary path")),
     };
 
     let binary_cpy_path = tmp_dir.path().join(binary_filename);
 
     // Move everything to the directory
-    if let Err(e) = fs::copy(binary, &binary_cpy_path) {
-        println!("{}", e);
-        return Err("Failed to copy binary to tmp fs");
-    }
+    fs::copy(binary, &binary_cpy_path)?;
 
     if let Some(w) = workdir {
-        if fs_extra::dir::copy(w, tmp_dir.path(), &CopyOptions::default()).is_err() {
-            return Err("Failed to copy rootfs");
-        }
+        fs_extra::dir::copy(w, tmp_dir.path(), &CopyOptions::default())?;
     }
 
     if let Some(r) = rootfs {
-        if fs_extra::dir::copy(r, tmp_dir.path(), &CopyOptions::default()).is_err() {
-            return Err("Failed to copy workdir");
-        }
+        fs_extra::dir::copy(r, tmp_dir.path(), &CopyOptions::default())?;
     }
 
     // chroot the directory
-    if unix::fs::chroot(tmp_dir.path()).is_err() {
-        return Err("Failed to chroot tmp directory");
-    }
+    unix::fs::chroot(tmp_dir.path())?;
 
-    if std::env::set_current_dir("/").is_err() {
-        return Err("Failed to change env dir");
-    }
+    std::env::set_current_dir("/")?;
 
     Ok(String::from(binary_filename.to_str().unwrap()))
 }

@@ -1,6 +1,6 @@
 use std::{
     io::{Read, Write},
-    path::{self, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 pub trait CgroupField {
@@ -60,8 +60,8 @@ pub trait Cgroup {
 }
 
 pub enum MemoryField {
-    PROCS_LIST,
-    MEMORY_LIMIT,
+    ProcList,
+    MemoryLimit,
 }
 
 pub struct Memory {
@@ -71,13 +71,13 @@ pub struct Memory {
 impl CgroupField for MemoryField {
     fn as_str(&self) -> &'static str {
         match self {
-            MemoryField::PROCS_LIST => "/cgroup.procs",
-            MemoryField::MEMORY_LIMIT => "/memory.limit_in_bytes",
+            MemoryField::ProcList => "/cgroup.procs",
+            MemoryField::MemoryLimit => "/memory.limit_in_bytes",
         }
     }
 }
 
-const MEMORY_CGROUP_PATH: &'static str = "/sys/fs/cgroup/memory/";
+const MEMORY_CGROUP_PATH: &str = "/sys/fs/cgroup/memory/";
 
 impl Cgroup for Memory {
     fn open(name: &str) -> Result<Box<Memory>, &'static str> {
@@ -88,7 +88,7 @@ impl Cgroup for Memory {
             return Err("Path is not a directory");
         }
 
-        Ok(Box::new(Memory { path: path }))
+        Ok(Box::new(Memory { path }))
     }
 
     fn create(name: &str) -> Result<Box<Memory>, &'static str> {
