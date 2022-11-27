@@ -41,5 +41,10 @@ int main(void)
 
     cap_free(caps);
 
+    for (;;)
+    {
+        
+    }
+
     return 0;
 }

@@ -4,6 +4,9 @@ use anyhow::Result;
 use caps::errors::CapsError;
 use caps::CapSet;
 use fs_extra::dir::CopyOptions;
+use seccomp::Context;
+use seccomp_sys::SCMP_ACT_ALLOW;
+use seccomp_sys::SCMP_ACT_ERRNO;
 use std::env;
 use std::fs;
 use std::os::unix;
@@ -11,9 +14,10 @@ use std::path::PathBuf;
 use std::process;
 use std::process::Command;
 use std::process::Stdio;
+use syscall_numbers::x86_64::{SYS_nfsservctl, SYS_personality, SYS_pivot_root};
 use tempdir::TempDir;
 
-use crate::cgroup::Cgroup;
+mod seccomp;
 
 #[derive(Debug)]
 struct Arguments {
@@ -122,6 +126,26 @@ fn create_environment(
     Ok(String::from(binary_filename.to_str().unwrap()))
 }
 
+fn set_allowed_syscalls() -> Result<()> {
+    // We allow everything
+    let seccomp: Context = Context::new(SCMP_ACT_ALLOW)?;
+
+    // Let's create a blocklist
+
+    seccomp.add_simple_array(
+        vec![
+            SYS_nfsservctl as i32,
+            SYS_personality as i32,
+            SYS_pivot_root as i32,
+        ],
+        SCMP_ACT_ERRNO(1),
+    )?;
+
+    seccomp.load()?;
+
+    Ok(())
+}
+
 fn main() {
     let args: Arguments = parse_arguments();
 
@@ -141,6 +165,8 @@ fn main() {
     println!("[*] Running the binary...");
 
     let exec_path: PathBuf = PathBuf::new().join("/").join(binary_filename);
+
+    set_allowed_syscalls().expect("Failed to set up syscalls");
 
     let mut proc = Command::new(&exec_path)
         .args(&args.binary_args)
