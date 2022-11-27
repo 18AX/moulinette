@@ -145,9 +145,16 @@ fn set_allowed_syscalls() -> Result<()> {
 
     Ok(())
 }
-
 fn main() {
     let args: Arguments = parse_arguments();
+
+    println!("[*] Adding pid to cgroup");
+
+    let cgroup = cgroup::CgroupV2Builder::new("moulinette")
+        .add_pid(process::id())
+        .set_mem_max(1048576)
+        .create()
+        .expect("Failed to create cgroup");
 
     println!("[*] Creating environment directory");
 
@@ -162,11 +169,12 @@ fn main() {
 
     drop_capabilities().expect("Failed to drop capabilities");
 
+    println!("[*] Setting allowed syscalls");
+    set_allowed_syscalls().expect("Failed to set up syscalls");
+
     println!("[*] Running the binary...");
 
     let exec_path: PathBuf = PathBuf::new().join("/").join(binary_filename);
-
-    set_allowed_syscalls().expect("Failed to set up syscalls");
 
     let mut proc = Command::new(&exec_path)
         .args(&args.binary_args)
@@ -182,4 +190,6 @@ fn main() {
         "process exited {}",
         exit.code().expect("Failed to retrieve exit code")
     );
+
+    cgroup.destroy().expect("Failed to destroy cgroup");
 }

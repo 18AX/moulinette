@@ -6,6 +6,10 @@
 
 int main(void)
 {
+    pid_t pid = getpid();
+
+    printf("pid: %d\n", pid);
+    
     printf("Capabilities:\n");
 
     cap_t caps = cap_get_pid(getpid());

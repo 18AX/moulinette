@@ -1,108 +1,78 @@
-use std::{
-    io::{Read, Write},
-    path::{Path, PathBuf},
-};
+use anyhow::{anyhow, Result};
+use std::{fs, path::PathBuf};
 
-pub trait CgroupField {
-    fn as_str(&self) -> &'static str;
+pub struct CgroupV2Builder {
+    name: String,
+    pids: Vec<u32>,
+    max_mem: Option<u64>,
 }
 
-pub trait Cgroup {
-    fn open(name: &str) -> Result<Box<Self>, &'static str>;
-    fn create(name: &str) -> Result<Box<Self>, &'static str>;
-    fn get_path(&self) -> &Path;
-
-    fn write_value<T: std::string::ToString>(
-        &self,
-        field: &dyn CgroupField,
-        value: T,
-    ) -> Result<(), ()> {
-        let mut path: PathBuf = PathBuf::from(self.get_path());
-        path.push(field.as_str());
-
-        self.write_to_file(&path, &value.to_string())
-    }
-
-    fn read_value(&self, field: &dyn CgroupField) -> Result<String, ()> {
-        let mut path: PathBuf = PathBuf::from(self.get_path());
-        path.push(field.as_str());
-
-        self.read_from_file(&path)
-    }
-
-    fn write_to_file(&self, p: &PathBuf, value: &str) -> Result<(), ()> {
-        let mut file = match std::fs::File::create(p) {
-            Ok(f) => f,
-            Err(_) => return Err(()),
-        };
-
-        if file.write(value.as_bytes()).is_err() {
-            return Err(());
-        }
-
-        Ok(())
-    }
-
-    fn read_from_file(&self, filename: &PathBuf) -> Result<String, ()> {
-        let mut file = match std::fs::File::open(filename) {
-            Ok(f) => f,
-            Err(_) => return Err(()),
-        };
-
-        let mut result: String = String::new();
-
-        if file.read_to_string(&mut result).is_err() {
-            return Err(());
-        }
-
-        Ok(result)
-    }
-}
-
-pub enum MemoryField {
-    ProcList,
-    MemoryLimit,
-}
-
-pub struct Memory {
+pub struct CgroupV2 {
+    name: String,
     path: PathBuf,
 }
 
-impl CgroupField for MemoryField {
-    fn as_str(&self) -> &'static str {
-        match self {
-            MemoryField::ProcList => "/cgroup.procs",
-            MemoryField::MemoryLimit => "/memory.limit_in_bytes",
+impl CgroupV2Builder {
+    pub fn new(name: &str) -> Self {
+        CgroupV2Builder {
+            name: String::from(name),
+            pids: Vec::new(),
+            max_mem: Option::None,
         }
+    }
+
+    pub fn add_pid(&mut self, pid: u32) -> &mut Self {
+        self.pids.push(pid);
+
+        self
+    }
+
+    pub fn set_mem_max(&mut self, max: u64) -> &mut Self {
+        self.max_mem = Some(max);
+
+        self
+    }
+
+    pub fn create(&mut self) -> Result<CgroupV2> {
+        let path_builder: PathBuf = PathBuf::from("/sys/fs/cgroup").join(&self.name);
+
+        if path_builder.exists() {
+            if !path_builder.is_dir() {
+                return Err(anyhow!("Path exist but is not a directory"));
+            }
+        } else {
+            fs::create_dir(&path_builder)?;
+        }
+
+        // Let's add all the pids in the cgroup
+        for pid in &self.pids {
+            fs::write(path_builder.join("cgroup.procs"), pid.to_string().as_str())?;
+        }
+
+        // Add memory controller at the root dir
+        fs::write("/sys/fs/cgroup/cgroup.subtree_control", "+memory")?;
+
+        // Set the memory limit
+        if let Some(max_mem) = self.max_mem {
+            fs::write(
+                path_builder.join("memory.max"),
+                max_mem.to_string().as_str(),
+            )?;
+        }
+
+        Ok(CgroupV2 {
+            name: String::from(&self.name),
+            path: path_builder,
+        })
     }
 }
 
-const MEMORY_CGROUP_PATH: &str = "/sys/fs/cgroup/memory/";
+impl CgroupV2 {
+    pub fn destroy(&self) -> Result<()> {
+        fs::remove_dir_all(&self.path)?;
 
-impl Cgroup for Memory {
-    fn open(name: &str) -> Result<Box<Memory>, &'static str> {
-        let mut path: PathBuf = PathBuf::from(MEMORY_CGROUP_PATH);
-        path.push(name);
-
-        if !path.is_dir() {
-            return Err("Path is not a directory");
-        }
-
-        Ok(Box::new(Memory { path }))
-    }
-
-    fn create(name: &str) -> Result<Box<Memory>, &'static str> {
-        let mut path: PathBuf = PathBuf::from(MEMORY_CGROUP_PATH);
-        path.push(name);
-
-        if std::fs::create_dir(&path).is_err() {
-            return Err("Failed to create new memory cgroup");
-        }
-
-        Ok(Box::new(Memory { path: path }))
-    }
-
-    fn get_path(&self) -> &Path {
-        &self.path
+        Ok(())
     }
 }
+
+impl CgroupV2 {}
