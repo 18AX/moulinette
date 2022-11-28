@@ -153,6 +153,7 @@ fn main() {
     let cgroup = cgroup::CgroupV2Builder::new("moulinette")
         .add_pid(process::id())
         .set_mem_max(1048576)
+        .set_pids_max(100)
         .create()
         .expect("Failed to create cgroup");
 

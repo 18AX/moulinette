@@ -5,6 +5,7 @@ pub struct CgroupV2Builder {
     name: String,
     pids: Vec<u32>,
     max_mem: Option<u64>,
+    max_pids: Option<u32>,
 }
 
 pub struct CgroupV2 {
@@ -18,6 +19,7 @@ impl CgroupV2Builder {
             name: String::from(name),
             pids: Vec::new(),
             max_mem: Option::None,
+            max_pids: Option::None,
         }
     }
 
@@ -33,36 +35,55 @@ impl CgroupV2Builder {
         self
     }
 
-    pub fn create(&mut self) -> Result<CgroupV2> {
-        let path_builder: PathBuf = PathBuf::from("/sys/fs/cgroup").join(&self.name);
+    pub fn set_pids_max(&mut self, max: u32) -> &mut Self {
+        self.max_pids = Some(max);
+        self
+    }
 
-        if path_builder.exists() {
-            if !path_builder.is_dir() {
+    pub fn create(&mut self) -> Result<CgroupV2> {
+        let cgroup_path: PathBuf = PathBuf::from("/sys/fs/cgroup/");
+
+        // Add memory and pids controllers
+        fs::write(cgroup_path.join("cgroup.subtree_control"), "+memory")?;
+        fs::write(cgroup_path.join("cgroup.subtree_control"), "+pids")?;
+
+        let new_group_path: PathBuf = cgroup_path.join(&self.name);
+
+        if new_group_path.exists() {
+            if !new_group_path.is_dir() {
                 return Err(anyhow!("Path exist but is not a directory"));
             }
         } else {
-            fs::create_dir(&path_builder)?;
+            fs::create_dir(&new_group_path)?;
         }
 
         // Let's add all the pids in the cgroup
         for pid in &self.pids {
-            fs::write(path_builder.join("cgroup.procs"), pid.to_string().as_str())?;
+            fs::write(
+                new_group_path.join("cgroup.procs"),
+                pid.to_string().as_str(),
+            )?;
         }
-
-        // Add memory controller at the root dir
-        fs::write("/sys/fs/cgroup/cgroup.subtree_control", "+memory")?;
 
         // Set the memory limit
         if let Some(max_mem) = self.max_mem {
             fs::write(
-                path_builder.join("memory.max"),
+                new_group_path.join("memory.max"),
                 max_mem.to_string().as_str(),
+            )?;
+        }
+
+        // Set the pids limit
+        if let Some(max_pids) = self.max_pids {
+            fs::write(
+                new_group_path.join("pids.max"),
+                max_pids.to_string().as_bytes(),
             )?;
         }
 
         Ok(CgroupV2 {
             name: String::from(&self.name),
-            path: path_builder,
+            path: new_group_path,
         })
     }
 }
