@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use std::{fs, path::PathBuf};
+use std::{ffi::CString, fs, path::PathBuf};
 
 pub struct CgroupV2Builder {
     name: String,
@@ -50,6 +50,14 @@ impl CgroupV2Builder {
 
     pub fn create(&mut self) -> Result<CgroupV2> {
         let cgroup_path: PathBuf = PathBuf::from("/sys/fs/cgroup/");
+
+        fs::create_dir_all(&cgroup_path)?;
+
+        let t = fs::read_dir(cgroup_path.as_path())?;
+
+        for e in t {
+            println!("{:?}", e);
+        }
 
         // Add cpu, cpuset, memory and pids controllers
         fs::write(cgroup_path.join("cgroup.subtree_control"), "+cpu")?;

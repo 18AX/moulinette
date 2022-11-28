@@ -1,19 +1,20 @@
-mod cgroup;
 use anyhow::Result;
 use caps::errors::CapsError;
 use caps::CapSet;
-use fs_extra::dir::CopyOptions;
+use rand::distributions::Alphanumeric;
+use rand::Rng;
 use seccomp::Context;
 use seccomp_sys::SCMP_ACT_ALLOW;
 use seccomp_sys::SCMP_ACT_ERRNO;
 use std::env;
-use std::os::unix;
+use std::ffi::CString;
 use std::process;
 use std::process::Command;
 use std::process::Stdio;
 use syscall_numbers::x86_64::{SYS_nfsservctl, SYS_personality, SYS_pivot_root};
-use tempdir::TempDir;
 
+mod cgroup;
+mod safe_env;
 mod seccomp;
 
 #[derive(Debug)]
@@ -87,35 +88,6 @@ fn drop_capabilities() -> Result<(), CapsError> {
     Ok(())
 }
 
-fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> Result<()> {
-    // Create a temp dir to be used as root file system
-    let tmp_dir: TempDir = TempDir::new("moulinette")?;
-
-    if let Some(w) = workdir {
-        fs_extra::dir::copy(w, tmp_dir.path(), &CopyOptions::default())?;
-    }
-
-    let cpy_options: CopyOptions = CopyOptions {
-        overwrite: true,
-        skip_exist: false,
-        buffer_size: 64000,
-        copy_inside: true,
-        content_only: true,
-        depth: 0,
-    };
-
-    if let Some(r) = rootfs {
-        fs_extra::dir::copy(r, tmp_dir.path(), &cpy_options)?;
-    }
-
-    // chroot the directory
-    unix::fs::chroot(tmp_dir.path())?;
-
-    std::env::set_current_dir("/")?;
-
-    Ok(())
-}
-
 fn set_allowed_syscalls() -> Result<()> {
     // We allow everything
     let seccomp: Context = Context::new(SCMP_ACT_ALLOW)?;
@@ -140,18 +112,50 @@ fn main() {
 
     println!("[*] Adding pid to cgroup");
 
-    let cgroup = cgroup::CgroupV2Builder::new("moulinette")
+    let unshare_res = unsafe { libc::unshare(libc::CLONE_NEWNS) };
+
+    if unshare_res != 0 {
+        panic!("Failed to unshare");
+    }
+
+    let hostname: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(10)
+        .map(char::from)
+        .collect();
+
+    unsafe {
+        libc::sethostname(
+            CString::new(hostname.as_str()).unwrap().as_ptr(),
+            hostname.len(),
+        );
+    }
+
+    println!("[*] Creating environment directory");
+
+    safe_env::create_environment(args.workdir.as_ref(), args.rootfs.as_ref())
+        .expect("Failed to create environment");
+
+    let unshare_res = unsafe {
+        libc::unshare(
+            libc::CLONE_NEWCGROUP
+                | libc::CLONE_NEWIPC
+                | libc::CLONE_NEWNET
+                | libc::CLONE_NEWPID
+                | libc::CLONE_NEWUTS,
+        )
+    };
+
+    if unshare_res != 0 {
+        panic!("Failed to unshare");
+    }
+    let cgroup = cgroup::CgroupV2Builder::new(&hostname)
         .add_pid(process::id())
         .set_cpus_number(1)
         .set_mem_max(1048576)
         .set_pids_max(100)
         .create()
         .expect("Failed to create cgroup");
-
-    println!("[*] Creating environment directory");
-
-    create_environment(args.workdir.as_ref(), args.rootfs.as_ref())
-        .expect("Failed to create environment");
 
     println!("[*] Dropping capabalities...");
 
