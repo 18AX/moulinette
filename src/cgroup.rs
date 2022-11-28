@@ -6,6 +6,7 @@ pub struct CgroupV2Builder {
     pids: Vec<u32>,
     max_mem: Option<u64>,
     max_pids: Option<u32>,
+    cpus: Option<u32>,
 }
 
 pub struct CgroupV2 {
@@ -20,6 +21,7 @@ impl CgroupV2Builder {
             pids: Vec::new(),
             max_mem: Option::None,
             max_pids: Option::None,
+            cpus: Option::None,
         }
     }
 
@@ -40,10 +42,18 @@ impl CgroupV2Builder {
         self
     }
 
+    pub fn set_cpus_number(&mut self, n: u32) -> &mut Self {
+        self.cpus = Some(n);
+
+        self
+    }
+
     pub fn create(&mut self) -> Result<CgroupV2> {
         let cgroup_path: PathBuf = PathBuf::from("/sys/fs/cgroup/");
 
-        // Add memory and pids controllers
+        // Add cpu, cpuset, memory and pids controllers
+        fs::write(cgroup_path.join("cgroup.subtree_control"), "+cpu")?;
+        fs::write(cgroup_path.join("cgroup.subtree_control"), "+cpuset")?;
         fs::write(cgroup_path.join("cgroup.subtree_control"), "+memory")?;
         fs::write(cgroup_path.join("cgroup.subtree_control"), "+pids")?;
 
@@ -62,6 +72,14 @@ impl CgroupV2Builder {
             fs::write(
                 new_group_path.join("cgroup.procs"),
                 pid.to_string().as_str(),
+            )?;
+        }
+
+        // Set the cpu limits
+        if let Some(n_cpus) = self.cpus {
+            fs::write(
+                new_group_path.join("cpuset.cpus"),
+                n_cpus.to_string().as_bytes(),
             )?;
         }
 
