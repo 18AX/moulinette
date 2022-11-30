@@ -124,13 +124,6 @@ fn main() {
         .map(char::from)
         .collect();
 
-    unsafe {
-        libc::sethostname(
-            CString::new(hostname.as_str()).unwrap().as_ptr(),
-            hostname.len(),
-        );
-    }
-
     println!("[*] Creating environment directory");
 
     safe_env::create_environment(args.workdir.as_ref(), args.rootfs.as_ref())
@@ -149,6 +142,14 @@ fn main() {
     if unshare_res != 0 {
         panic!("Failed to unshare");
     }
+
+    unsafe {
+        libc::sethostname(
+            CString::new(hostname.as_str()).unwrap().as_ptr(),
+            hostname.len(),
+        );
+    }
+
     let cgroup = cgroup::CgroupV2Builder::new(&hostname)
         .add_pid(process::id())
         .set_cpus_number(1)
