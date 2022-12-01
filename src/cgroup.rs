@@ -53,12 +53,6 @@ impl CgroupV2Builder {
 
         fs::create_dir_all(&cgroup_path)?;
 
-        let t = fs::read_dir(cgroup_path.as_path())?;
-
-        for e in t {
-            println!("{:?}", e);
-        }
-
         // Add cpu, cpuset, memory and pids controllers
         fs::write(cgroup_path.join("cgroup.subtree_control"), "+cpu")?;
         fs::write(cgroup_path.join("cgroup.subtree_control"), "+cpuset")?;

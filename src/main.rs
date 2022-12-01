@@ -14,6 +14,7 @@ use std::process::Stdio;
 use syscall_numbers::x86_64::{SYS_nfsservctl, SYS_personality, SYS_pivot_root};
 
 mod cgroup;
+mod docker_image;
 mod safe_env;
 mod seccomp;
 
@@ -124,6 +125,15 @@ fn main() {
         .map(char::from)
         .collect();
 
+    // Creating the cgroup
+    let cgroup = cgroup::CgroupV2Builder::new(&hostname)
+        .add_pid(process::id())
+        .set_cpus_number(1)
+        .set_mem_max(1073741824)
+        .set_pids_max(100)
+        .create()
+        .expect("Failed to create cgroup");
+
     println!("[*] Creating environment directory");
 
     safe_env::create_environment(args.workdir.as_ref(), args.rootfs.as_ref())
@@ -149,14 +159,6 @@ fn main() {
             hostname.len(),
         );
     }
-
-    let cgroup = cgroup::CgroupV2Builder::new(&hostname)
-        .add_pid(process::id())
-        .set_cpus_number(1)
-        .set_mem_max(1048576)
-        .set_pids_max(100)
-        .create()
-        .expect("Failed to create cgroup");
 
     println!("[*] Dropping capabalities...");
 

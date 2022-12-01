@@ -1,8 +1,16 @@
 use anyhow::{anyhow, Result};
 use fs_extra::dir::CopyOptions;
 use libc::SYS_pivot_root;
-use std::{ffi::CString, fs, os::unix, path::PathBuf, ptr::null};
+use std::{
+    ffi::CString,
+    fs,
+    os::unix,
+    path::{Path, PathBuf},
+    ptr::null,
+};
 use tempdir::TempDir;
+
+use crate::docker_image;
 
 pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> Result<()> {
     // Create a temp dir to be used as root file system
@@ -22,8 +30,11 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
         depth: 0,
     };
 
-    if let Some(r) = rootfs {
-        fs_extra::dir::copy(r, tmp_dir.path(), &cpy_options)?;
+    if let Some(rfs) = rootfs {
+        // If we cannot pull the docker image we try to copy the rootfs from the host
+        if docker_image::download(rfs, tmp_dir.path()).is_err() {
+            fs_extra::dir::copy(rfs, tmp_dir.path(), &cpy_options)?;
+        }
     }
 
     // Mount the tmpfs directory
@@ -77,13 +88,12 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
         ));
     }
 
+    unsafe {
+        libc::umount(CString::new("/oldrootfs")?.as_ptr());
+    }
     // chroot the directory
     unix::fs::chroot("/")?;
     std::env::set_current_dir(".")?;
-
-    unsafe {
-        libc::umount(CString::new("oldrootfs")?.as_ptr());
-    }
 
     Ok(())
 }
