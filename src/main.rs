@@ -111,8 +111,6 @@ fn set_allowed_syscalls() -> Result<()> {
 fn main() {
     let args: Arguments = parse_arguments();
 
-    println!("[*] Adding pid to cgroup");
-
     let unshare_res = unsafe { libc::unshare(libc::CLONE_NEWNS) };
 
     if unshare_res != 0 {
@@ -133,8 +131,6 @@ fn main() {
         .set_pids_max(100)
         .create()
         .expect("Failed to create cgroup");
-
-    println!("[*] Creating environment directory");
 
     safe_env::create_environment(args.workdir.as_ref(), args.rootfs.as_ref())
         .expect("Failed to create environment");
@@ -160,14 +156,9 @@ fn main() {
         );
     }
 
-    println!("[*] Dropping capabalities...");
-
     drop_capabilities().expect("Failed to drop capabilities");
 
-    println!("[*] Setting allowed syscalls");
     set_allowed_syscalls().expect("Failed to set up syscalls");
-
-    println!("[*] Running the binary...");
 
     let mut proc = Command::new(args.binary_name)
         .args(&args.binary_args)

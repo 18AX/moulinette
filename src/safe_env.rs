@@ -1,13 +1,7 @@
 use anyhow::{anyhow, Result};
 use fs_extra::dir::CopyOptions;
 use libc::SYS_pivot_root;
-use std::{
-    ffi::CString,
-    fs,
-    os::unix,
-    path::{Path, PathBuf},
-    ptr::null,
-};
+use std::{ffi::CString, fs, path::PathBuf};
 use tempdir::TempDir;
 
 use crate::docker_image;
@@ -77,8 +71,6 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
     // pivot root
     let pivot_new: CString = CString::new(path_buf.as_os_str().to_str().unwrap())?;
     let pivot_old: CString = CString::new(oldroot.as_os_str().to_str().unwrap())?;
-
-    println!("pivot_new {:?} pivot_old {:?}", pivot_new, pivot_old);
 
     let pivot_root_res: i64 =
         unsafe { libc::syscall(SYS_pivot_root, pivot_new.as_ptr(), pivot_old.as_ptr()) };

@@ -71,13 +71,11 @@ struct ManifestLayers {
 type Result<T> = std::result::Result<T, DockerError>;
 
 fn get_auth_token(image_name: &str) -> Result<String> {
-    println!("{}", image_name);
     let auth_url = format!(
         "https://auth.docker.io/token?service=registry.docker.io&scope=repository:{}:pull",
         image_name
     );
 
-    println!("{}", auth_url);
     let auth_req = match reqwest::blocking::get(auth_url) {
         Ok(r) => r,
         Err(e) => {
@@ -218,8 +216,6 @@ pub fn download(image: &str, output: &Path) -> Result<()> {
     let layer = get_layer(&token, image_name, &manifest)?;
 
     download_layer(&token, image_name, &layer, output)?;
-
-    println!("layer digest {}", layer.digest);
 
     Ok(())
 }

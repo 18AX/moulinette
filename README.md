@@ -7,7 +7,7 @@
 - [ ] Bonus: usable by a normal user
 - [X] Third step: poor isolation with chroot
 - [X] Fourth step: filter syscalls with seccomp
-- [ ] Fifth step: automate the creation of the env by pulling a docker image
+- [X] Fifth step: automate the creation of the env by pulling a docker image
 - [X] Sixth step: real isolation by creating new namespaces
 - [ ] Bonus: Usable by a normal user
 - [X] Seventh step: avoid leaks of information (done with pivot root and unmounting old root)
