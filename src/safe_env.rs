@@ -104,6 +104,15 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
             0,
             std::ptr::null(),
         );
+
+        libc::mount(
+            CString::new("/oldrootfs/dev")?.as_ptr(),
+            CString::new("/dev")?.as_ptr(),
+            std::ptr::null(),
+            libc::MS_MOVE,
+            std::ptr::null(),
+        );
+
         libc::umount2(CString::new(oldrootfs)?.as_ptr(), libc::MNT_DETACH);
     }
 
