@@ -1,6 +1,7 @@
 use anyhow::Result;
 use caps::errors::CapsError;
 use caps::CapSet;
+use log::info;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use seccomp::Context;
@@ -109,6 +110,9 @@ fn set_allowed_syscalls() -> Result<()> {
     Ok(())
 }
 fn main() {
+    env_logger::init();
+
+    info!(target:"main", "parsing arguments");
     let args: Arguments = parse_arguments();
 
     let unshare_res = unsafe { libc::unshare(libc::CLONE_NEWNS) };
@@ -123,6 +127,8 @@ fn main() {
         .map(char::from)
         .collect();
 
+    info!(target:"main", "generated random hostname {}", hostname);
+
     // Creating the cgroup
     let cgroup = cgroup::CgroupV2Builder::new(&hostname)
         .add_pid(process::id())
@@ -132,8 +138,12 @@ fn main() {
         .create()
         .expect("Failed to create cgroup");
 
+    info!(target:"main", "process added to cgroup");
+
     safe_env::create_environment(args.workdir.as_ref(), args.rootfs.as_ref())
         .expect("Failed to create environment");
+
+    info!(target:"main", "safe environment created");
 
     let unshare_res = unsafe {
         libc::unshare(
@@ -144,6 +154,8 @@ fn main() {
                 | libc::CLONE_NEWUTS,
         )
     };
+
+    info!(target:"main", "unshare NEWCGROUP NEWIPC NEWNET NEWPID NEWUTS");
 
     if unshare_res != 0 {
         panic!("Failed to unshare");
@@ -158,7 +170,11 @@ fn main() {
 
     drop_capabilities().expect("Failed to drop capabilities");
 
+    info!(target:"main", "capabilities dropped");
+
     set_allowed_syscalls().expect("Failed to set up syscalls");
+
+    info!(target:"main", "syscall filtered");
 
     let mut proc = Command::new(args.binary_name)
         .args(&args.binary_args)

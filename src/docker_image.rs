@@ -4,6 +4,7 @@ use std::{
 };
 
 use flate2::read::GzDecoder;
+use log::info;
 use reqwest::header;
 use serde::Deserialize;
 use tar::Archive;
@@ -209,13 +210,21 @@ pub fn download(image: &str, output: &Path) -> Result<()> {
     }
     let (image_name, image_version) = (parts[0], parts[1]);
 
+    info!(target:"docker", "downloading {}:{}", image_name, image_version);
+
     let token = get_auth_token(image_name)?;
 
     let manifest = get_manifest(&token, image_name, image_version)?;
 
+    info!(target:"docker_manifest_digest", "{}", manifest.digest);
+
     let layer = get_layer(&token, image_name, &manifest)?;
 
+    info!(target:"docker_layer_digest", "{}", layer.digest);
+
     download_layer(&token, image_name, &layer, output)?;
+
+    info!(target:"docker", "{}:{} downloaded", image_name, image_version);
 
     Ok(())
 }

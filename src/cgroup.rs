@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use log::{error, info};
 use std::{ffi::CString, fs, path::PathBuf};
 
 pub struct CgroupV2Builder {
@@ -63,11 +64,14 @@ impl CgroupV2Builder {
 
         if new_group_path.exists() {
             if !new_group_path.is_dir() {
+                error!(target:"cgroup", "{:?} exists but is not a directory", new_group_path);
                 return Err(anyhow!("Path exist but is not a directory"));
             }
         } else {
             fs::create_dir(&new_group_path)?;
         }
+
+        info!(target:"cgroup", "{:?} created", new_group_path);
 
         // Let's add all the pids in the cgroup
         for pid in &self.pids {

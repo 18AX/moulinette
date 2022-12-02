@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use fs_extra::dir::CopyOptions;
 use libc::SYS_pivot_root;
+use log::{error, info, warn};
 use std::{ffi::CString, fs, path::PathBuf};
 use tempdir::TempDir;
 
@@ -9,6 +10,8 @@ use crate::docker_image;
 pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> Result<()> {
     // Create a temp dir to be used as root file system
     let tmp_dir: TempDir = TempDir::new("moulinette")?;
+
+    info!(target:"safe_env", "env path {:?}", tmp_dir);
 
     // Copy the workdir and the rootfs
     if let Some(w) = workdir {
@@ -26,7 +29,8 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
 
     if let Some(rfs) = rootfs {
         // If we cannot pull the docker image we try to copy the rootfs from the host
-        if docker_image::download(rfs, tmp_dir.path()).is_err() {
+        if let Err(e) = docker_image::download(rfs, tmp_dir.path()) {
+            warn!(target:"rootfs", "{:?}", e);
             fs_extra::dir::copy(rfs, tmp_dir.path(), &cpy_options)?;
         }
     }
@@ -45,8 +49,11 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
     };
 
     if res != 0 {
+        error!(target:"/", "{}", std::io::Error::last_os_error());
         return Err(anyhow!("mount failed {}", res));
     }
+
+    info!(target:"/", "mounted");
 
     let res: i32 = unsafe {
         libc::mount(
@@ -59,6 +66,7 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
     };
 
     if res != 0 {
+        error!(target:"tmpfs", "{}", std::io::Error::last_os_error());
         return Err(anyhow!("mount failed {}", res));
     }
 
@@ -76,6 +84,7 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
         unsafe { libc::syscall(SYS_pivot_root, pivot_new.as_ptr(), pivot_old.as_ptr()) };
 
     if pivot_root_res != 0 {
+        error!(target:"pivot_root", "{}", std::io::Error::last_os_error());
         return Err(anyhow!(
             "Failed to pivot root {}",
             std::io::Error::last_os_error()
