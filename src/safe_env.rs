@@ -59,7 +59,7 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
             src_string.as_ptr(),
             src_string.as_ptr(),
             std::ptr::null(),
-            libc::MS_BIND | libc::MS_REC,
+            libc::MS_BIND,
             std::ptr::null(),
         )
     };
@@ -78,6 +78,8 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
     let pivot_new: CString = CString::new(path_buf.as_os_str().to_str().unwrap())?;
     let pivot_old: CString = CString::new(oldroot.as_os_str().to_str().unwrap())?;
 
+    println!("pivot_new {:?} pivot_old {:?}", pivot_new, pivot_old);
+
     let pivot_root_res: i64 =
         unsafe { libc::syscall(SYS_pivot_root, pivot_new.as_ptr(), pivot_old.as_ptr()) };
 
@@ -88,12 +90,24 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
         ));
     }
 
-    unsafe {
-        libc::umount(CString::new("/oldrootfs")?.as_ptr());
-    }
     // chroot the directory
-    unix::fs::chroot("/")?;
-    std::env::set_current_dir(".")?;
+    //unix::fs::chroot("/")?;
+    std::env::set_current_dir("/")?;
+
+    let oldrootfs: &str = "/oldrootfs";
+
+    unsafe {
+        libc::mount(
+            std::ptr::null(),
+            CString::new("/proc")?.as_ptr(),
+            CString::new("proc")?.as_ptr(),
+            0,
+            std::ptr::null(),
+        );
+        libc::umount2(CString::new(oldrootfs)?.as_ptr(), libc::MNT_DETACH);
+    }
+
+    fs::remove_dir(oldrootfs)?;
 
     Ok(())
 }
