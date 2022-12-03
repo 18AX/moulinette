@@ -11,7 +11,7 @@
 - [X] Sixth step: real isolation by creating new namespaces
 - [ ] Bonus: Usable by a normal user
 - [X] Seventh step: avoid leaks of information (done with pivot root and unmounting old root)
-- [ ] Seventh bis: mount the student code
+- [X] Seventh bis: mount the student code
 - [X] Eighth step: Container with unique hostname
 - [X] Ninth step: pivot root
 - [ ] Tenth step: Sandbox connected to network interfaces
