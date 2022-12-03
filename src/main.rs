@@ -2,13 +2,15 @@ use anyhow::Result;
 use caps::errors::CapsError;
 use caps::CapSet;
 use log::info;
+use nix::sched::unshare;
+use nix::sched::CloneFlags;
+use nix::unistd::sethostname;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use seccomp::Context;
 use seccomp_sys::SCMP_ACT_ALLOW;
 use seccomp_sys::SCMP_ACT_ERRNO;
 use std::env;
-use std::ffi::CString;
 use std::process;
 use std::process::Command;
 use std::process::Stdio;
@@ -115,11 +117,7 @@ fn main() {
     info!(target:"main", "parsing arguments");
     let args: Arguments = parse_arguments();
 
-    let unshare_res = unsafe { libc::unshare(libc::CLONE_NEWNS) };
-
-    if unshare_res != 0 {
-        panic!("Failed to unshare");
-    }
+    unshare(CloneFlags::CLONE_NEWNS).expect("Failed to unshare");
 
     let hostname: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -145,28 +143,18 @@ fn main() {
 
     info!(target:"main", "safe environment created");
 
-    let unshare_res = unsafe {
-        libc::unshare(
-            libc::CLONE_NEWCGROUP
-                | libc::CLONE_NEWIPC
-                | libc::CLONE_NEWNET
-                | libc::CLONE_NEWPID
-                | libc::CLONE_NEWUTS,
-        )
-    };
+    unshare(
+        CloneFlags::CLONE_NEWCGROUP
+            | CloneFlags::CLONE_NEWIPC
+            | CloneFlags::CLONE_NEWNET
+            | CloneFlags::CLONE_NEWPID
+            | CloneFlags::CLONE_NEWUTS,
+    )
+    .expect("Failed to unshare");
 
     info!(target:"main", "unshare NEWCGROUP NEWIPC NEWNET NEWPID NEWUTS");
 
-    if unshare_res != 0 {
-        panic!("Failed to unshare");
-    }
-
-    unsafe {
-        libc::sethostname(
-            CString::new(hostname.as_str()).unwrap().as_ptr(),
-            hostname.len(),
-        );
-    }
+    sethostname(&hostname).expect("Failed to set hostname");
 
     drop_capabilities().expect("Failed to drop capabilities");
 

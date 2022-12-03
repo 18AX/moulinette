@@ -1,21 +1,52 @@
-use anyhow::{anyhow, Result};
 use fs_extra::dir::CopyOptions;
-use libc::SYS_pivot_root;
 use log::{error, info, warn};
-use std::{ffi::CString, fs, path::PathBuf};
+use nix::{
+    errno::Errno,
+    mount::{mount, umount2, MntFlags, MsFlags},
+    unistd::pivot_root,
+};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 use tempdir::TempDir;
 
 use crate::docker_image;
 
+#[derive(Debug)]
+pub enum SafeEnvError {
+    IOError(std::io::Error),
+    Mount(Errno),
+    Umount(Errno),
+    PivotRoot(Errno),
+}
+
+type Result<T> = std::result::Result<T, SafeEnvError>;
+
+fn mount_workdir(src: &Path, tmp_dir: &Path) -> Result<()> {
+    let workdir_path: PathBuf = PathBuf::from(tmp_dir).join("home").join("student");
+
+    if let Err(e) = fs::create_dir_all(&workdir_path) {
+        error!(target:"workdir", "{:?}", e);
+        return Err(SafeEnvError::IOError(e));
+    }
+
+    Ok(())
+}
+
 pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> Result<()> {
     // Create a temp dir to be used as root file system
-    let tmp_dir: TempDir = TempDir::new("moulinette")?;
+    let tmp_dir: TempDir = match TempDir::new("moulinette") {
+        Ok(t) => t,
+        Err(e) => return Err(SafeEnvError::IOError(e)),
+    };
 
     info!(target:"safe_env", "env path {:?}", tmp_dir);
 
     // Copy the workdir and the rootfs
+
     if let Some(w) = workdir {
-        fs_extra::dir::copy(w, tmp_dir.path(), &CopyOptions::default())?;
+        mount_workdir(Path::new(w), tmp_dir.path())?;
     }
 
     let cpy_options: CopyOptions = CopyOptions {
@@ -31,93 +62,101 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
         // If we cannot pull the docker image we try to copy the rootfs from the host
         if let Err(e) = docker_image::download(rfs, tmp_dir.path()) {
             warn!(target:"rootfs", "{:?}", e);
-            fs_extra::dir::copy(rfs, tmp_dir.path(), &cpy_options)?;
+            if let Err(_) = fs_extra::dir::copy(rfs, tmp_dir.path(), &cpy_options) {
+                return Err(SafeEnvError::IOError(std::io::Error::last_os_error()));
+            }
         }
     }
 
     // Mount the tmpfs directory
-    let src_string = CString::new(tmp_dir.path().as_os_str().to_str().unwrap())?;
 
-    let res = unsafe {
-        libc::mount(
-            std::ptr::null(),
-            CString::new("/")?.as_ptr(),
-            std::ptr::null(),
-            libc::MS_PRIVATE | libc::MS_REC,
-            std::ptr::null(),
-        )
-    };
-
-    if res != 0 {
-        error!(target:"/", "{}", std::io::Error::last_os_error());
-        return Err(anyhow!("mount failed {}", res));
+    if let Err(e) = mount(
+        Option::<&str>::None,
+        "/",
+        Option::<&str>::None,
+        MsFlags::MS_PRIVATE | MsFlags::MS_REC,
+        Option::<&str>::None,
+    ) {
+        error!(target:"/", "mount failed");
+        return Err(SafeEnvError::Mount(e));
     }
 
     info!(target:"/", "mounted");
 
-    let res: i32 = unsafe {
-        libc::mount(
-            src_string.as_ptr(),
-            src_string.as_ptr(),
-            std::ptr::null(),
-            libc::MS_BIND,
-            std::ptr::null(),
-        )
-    };
-
-    if res != 0 {
-        error!(target:"tmpfs", "{}", std::io::Error::last_os_error());
-        return Err(anyhow!("mount failed {}", res));
+    if let Err(e) = mount(
+        Option::Some(tmp_dir.path()),
+        tmp_dir.path(),
+        Option::<&str>::None,
+        MsFlags::MS_BIND,
+        Option::<&str>::None,
+    ) {
+        error!(target:"tmpdir", "mount failed");
+        return Err(SafeEnvError::Mount(e));
     }
 
-    let path_buf = PathBuf::from(tmp_dir.path());
-    let oldroot = path_buf.join("oldrootfs");
+    info!(target:"tmpdir", "mounted");
 
-    std::env::set_current_dir(tmp_dir.path())?;
-    fs::create_dir_all(&oldroot)?;
+    let oldroot = PathBuf::from(tmp_dir.path()).join("oldrootfs");
 
-    // pivot root
-    let pivot_new: CString = CString::new(path_buf.as_os_str().to_str().unwrap())?;
-    let pivot_old: CString = CString::new(oldroot.as_os_str().to_str().unwrap())?;
-
-    let pivot_root_res: i64 =
-        unsafe { libc::syscall(SYS_pivot_root, pivot_new.as_ptr(), pivot_old.as_ptr()) };
-
-    if pivot_root_res != 0 {
-        error!(target:"pivot_root", "{}", std::io::Error::last_os_error());
-        return Err(anyhow!(
-            "Failed to pivot root {}",
-            std::io::Error::last_os_error()
-        ));
+    if let Err(e) = std::env::set_current_dir(tmp_dir.path()) {
+        return Err(SafeEnvError::IOError(e));
     }
 
-    // chroot the directory
-    //unix::fs::chroot("/")?;
-    std::env::set_current_dir("/")?;
-
-    let oldrootfs: &str = "/oldrootfs";
-
-    unsafe {
-        libc::mount(
-            std::ptr::null(),
-            CString::new("/proc")?.as_ptr(),
-            CString::new("proc")?.as_ptr(),
-            0,
-            std::ptr::null(),
-        );
-
-        libc::mount(
-            CString::new("/oldrootfs/dev")?.as_ptr(),
-            CString::new("/dev")?.as_ptr(),
-            std::ptr::null(),
-            libc::MS_MOVE,
-            std::ptr::null(),
-        );
-
-        libc::umount2(CString::new(oldrootfs)?.as_ptr(), libc::MNT_DETACH);
+    if let Err(e) = fs::create_dir_all(&oldroot) {
+        return Err(SafeEnvError::IOError(e));
     }
 
-    fs::remove_dir(oldrootfs)?;
+    if let Err(e) = pivot_root(tmp_dir.path(), &oldroot) {
+        error!(target:"pivot_root", "failed");
+        return Err(SafeEnvError::PivotRoot(e));
+    }
+
+    info!(target:"pivot_root", "done");
+
+    if let Err(e) = std::env::set_current_dir("/") {
+        return Err(SafeEnvError::IOError(e));
+    }
+
+    // Update the path of the oldroot
+    let oldroot = PathBuf::from("/oldrootfs");
+
+    if let Err(e) = mount(
+        Option::<&str>::None,
+        "/proc",
+        Option::Some("proc"),
+        MsFlags::empty(),
+        Option::<&str>::None,
+    ) {
+        error!(target:"proc", "mount failed");
+        return Err(SafeEnvError::Mount(e));
+    }
+
+    info!(target:"proc", "mounted");
+
+    if let Err(e) = mount(
+        Option::Some(&oldroot.join("dev")),
+        "/dev",
+        Option::<&str>::None,
+        MsFlags::MS_MOVE,
+        Option::<&str>::None,
+    ) {
+        error!(target:"dev", "mount failed");
+        return Err(SafeEnvError::Mount(e));
+    }
+
+    info!(target:"dev", "mounted");
+
+    if let Err(e) = umount2(&oldroot, MntFlags::MNT_DETACH) {
+        error!(target:"oldroot", "unmount failed");
+        return Err(SafeEnvError::Umount(e));
+    }
+
+    if let Err(e) = fs::remove_dir(oldroot) {
+        error!(target:"oldroot", "remove_dir failed");
+        return Err(SafeEnvError::IOError(e));
+    }
+
+    info!(target:"oldroot", "cleaned");
 
     Ok(())
 }
