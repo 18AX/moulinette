@@ -186,10 +186,9 @@ fn main() {
 
     let exit = proc.wait().expect("Failed to wait");
 
-    println!(
-        "process exited {}",
-        exit.code().expect("Failed to retrieve exit code")
-    );
+    let exit_code = exit.code().expect("Failed to retrieve exit code");
 
-    cgroup.destroy().expect("Failed to destroy cgroup");
+    info!(target:"exit_code", "{}", exit_code);
+
+    std::process::exit(exit_code);
 }

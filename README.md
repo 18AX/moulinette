@@ -15,3 +15,11 @@
 - [X] Eighth step: Container with unique hostname
 - [X] Ninth step: pivot root
 - [ ] Tenth step: Sandbox connected to network interfaces
+
+## How to run
+
+```sh
+cargo build --release
+sudo RUST_LOG=info target/release/moulinette -I library/alpine:latest /bin/sh # Run with logs
+sudo target/release/moulinette -I library/alpine:latest /bin/sh # Run without logs
+```
