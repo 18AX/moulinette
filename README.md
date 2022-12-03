@@ -18,8 +18,19 @@
 
 ## How to run
 
+### Using cargo
+
 ```sh
 cargo build --release
 sudo RUST_LOG=info target/release/moulinette -I library/alpine:latest /bin/sh # Run with logs
 sudo target/release/moulinette -I library/alpine:latest /bin/sh # Run without logs
+```
+
+### Using the makefile
+
+```sh
+make release # Build in release mode
+make debug # Build in debug mode
+make run-release # Run alpine:latest in release mode
+make debug-release # Run alpine:latest in debug mode
 ```
