@@ -23,13 +23,28 @@ pub enum SafeEnvError {
 
 type Result<T> = std::result::Result<T, SafeEnvError>;
 
-fn mount_workdir(src: &Path, tmp_dir: &Path) -> Result<()> {
-    let workdir_path: PathBuf = PathBuf::from(tmp_dir).join("home").join("student");
+fn mount_workdir(src: &Path) -> Result<()> {
+    let workdir_path: PathBuf = PathBuf::from("/").join("home").join("student");
+
+    info!(target:"workdir", "{:?}", src);
 
     if let Err(e) = fs::create_dir_all(&workdir_path) {
-        error!(target:"workdir", "{:?}", e);
+        error!(target:"workdir", "create_dir failed");
         return Err(SafeEnvError::IOError(e));
     }
+
+    if let Err(e) = mount(
+        Some(src),
+        &workdir_path,
+        Option::Some("rw"),
+        MsFlags::MS_BIND,
+        Option::<&str>::None,
+    ) {
+        error!(target:"workdir", "mount failed");
+        return Err(SafeEnvError::Mount(e));
+    }
+
+    info!(target:"workdir", "mounted");
 
     Ok(())
 }
@@ -143,12 +158,6 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
 
     info!(target:"safe_env", "env path {:?}", tmp_dir);
 
-    // Copy the workdir and the rootfs
-
-    if let Some(w) = workdir {
-        mount_workdir(Path::new(w), tmp_dir.path())?;
-    }
-
     let cpy_options: CopyOptions = CopyOptions {
         overwrite: true,
         skip_exist: false,
@@ -172,6 +181,12 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
     let oldroot = switch_root(tmp_dir.path())?;
 
     mount_os_fs(&oldroot)?;
+
+    // Mount student files
+    if let Some(w) = workdir {
+        let p = format!("{}/{}", oldroot.as_os_str().to_str().unwrap(), w);
+        mount_workdir(Path::new(&p))?;
+    }
 
     clean_oldrootfs(&oldroot)?;
 
