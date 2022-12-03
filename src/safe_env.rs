@@ -34,6 +34,106 @@ fn mount_workdir(src: &Path, tmp_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+fn switch_root(rootfs: &Path) -> Result<&Path> {
+    // Check if we can mout /
+    if let Err(e) = mount(
+        Option::<&str>::None,
+        "/",
+        Option::<&str>::None,
+        MsFlags::MS_PRIVATE | MsFlags::MS_REC,
+        Option::<&str>::None,
+    ) {
+        error!(target:"/", "mount failed");
+        return Err(SafeEnvError::Mount(e));
+    }
+
+    info!(target:"/", "mounted");
+
+    // Mount tmpdir for pivot root
+    if let Err(e) = mount(
+        Option::Some(rootfs),
+        rootfs,
+        Option::<&str>::None,
+        MsFlags::MS_BIND,
+        Option::<&str>::None,
+    ) {
+        error!(target:"tmpdir", "mount failed");
+        return Err(SafeEnvError::Mount(e));
+    }
+
+    info!(target:"tmpdir", "mounted");
+
+    // Create the directory where pivot root will mount the oldrootfs
+    let oldroot = PathBuf::from(rootfs).join("oldrootfs");
+
+    if let Err(e) = std::env::set_current_dir(rootfs) {
+        return Err(SafeEnvError::IOError(e));
+    }
+
+    if let Err(e) = fs::create_dir_all(&oldroot) {
+        return Err(SafeEnvError::IOError(e));
+    }
+
+    if let Err(e) = pivot_root(rootfs, &oldroot) {
+        error!(target:"pivot_root", "failed");
+        return Err(SafeEnvError::PivotRoot(e));
+    }
+
+    info!(target:"pivot_root", "done");
+
+    if let Err(e) = std::env::set_current_dir("/") {
+        return Err(SafeEnvError::IOError(e));
+    }
+
+    Ok(Path::new("/oldrootfs"))
+}
+
+fn mount_os_fs(oldroot: &Path) -> Result<()> {
+    if let Err(e) = mount(
+        Option::<&str>::None,
+        "/proc",
+        Option::Some("proc"),
+        MsFlags::empty(),
+        Option::<&str>::None,
+    ) {
+        error!(target:"proc", "mount failed");
+        return Err(SafeEnvError::Mount(e));
+    }
+
+    info!(target:"proc", "mounted");
+
+    if let Err(e) = mount(
+        Option::Some(&oldroot.join("dev")),
+        "/dev",
+        Option::<&str>::None,
+        MsFlags::MS_MOVE,
+        Option::<&str>::None,
+    ) {
+        error!(target:"dev", "mount failed");
+        return Err(SafeEnvError::Mount(e));
+    }
+
+    info!(target:"dev", "mounted");
+
+    Ok(())
+}
+
+fn clean_oldrootfs(oldroot: &Path) -> Result<()> {
+    if let Err(e) = umount2(oldroot, MntFlags::MNT_DETACH) {
+        error!(target:"oldroot", "unmount failed");
+        return Err(SafeEnvError::Umount(e));
+    }
+
+    if let Err(e) = fs::remove_dir(oldroot) {
+        error!(target:"oldroot", "remove_dir failed");
+        return Err(SafeEnvError::IOError(e));
+    }
+
+    info!(target:"oldroot", "cleaned");
+
+    Ok(())
+}
+
 pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> Result<()> {
     // Create a temp dir to be used as root file system
     let tmp_dir: TempDir = match TempDir::new("moulinette") {
@@ -68,95 +168,12 @@ pub fn create_environment(workdir: Option<&String>, rootfs: Option<&String>) -> 
         }
     }
 
-    // Mount the tmpfs directory
-
-    if let Err(e) = mount(
-        Option::<&str>::None,
-        "/",
-        Option::<&str>::None,
-        MsFlags::MS_PRIVATE | MsFlags::MS_REC,
-        Option::<&str>::None,
-    ) {
-        error!(target:"/", "mount failed");
-        return Err(SafeEnvError::Mount(e));
-    }
-
-    info!(target:"/", "mounted");
-
-    if let Err(e) = mount(
-        Option::Some(tmp_dir.path()),
-        tmp_dir.path(),
-        Option::<&str>::None,
-        MsFlags::MS_BIND,
-        Option::<&str>::None,
-    ) {
-        error!(target:"tmpdir", "mount failed");
-        return Err(SafeEnvError::Mount(e));
-    }
-
-    info!(target:"tmpdir", "mounted");
-
-    let oldroot = PathBuf::from(tmp_dir.path()).join("oldrootfs");
-
-    if let Err(e) = std::env::set_current_dir(tmp_dir.path()) {
-        return Err(SafeEnvError::IOError(e));
-    }
-
-    if let Err(e) = fs::create_dir_all(&oldroot) {
-        return Err(SafeEnvError::IOError(e));
-    }
-
-    if let Err(e) = pivot_root(tmp_dir.path(), &oldroot) {
-        error!(target:"pivot_root", "failed");
-        return Err(SafeEnvError::PivotRoot(e));
-    }
-
-    info!(target:"pivot_root", "done");
-
-    if let Err(e) = std::env::set_current_dir("/") {
-        return Err(SafeEnvError::IOError(e));
-    }
-
     // Update the path of the oldroot
-    let oldroot = PathBuf::from("/oldrootfs");
+    let oldroot = switch_root(tmp_dir.path())?;
 
-    if let Err(e) = mount(
-        Option::<&str>::None,
-        "/proc",
-        Option::Some("proc"),
-        MsFlags::empty(),
-        Option::<&str>::None,
-    ) {
-        error!(target:"proc", "mount failed");
-        return Err(SafeEnvError::Mount(e));
-    }
+    mount_os_fs(&oldroot)?;
 
-    info!(target:"proc", "mounted");
-
-    if let Err(e) = mount(
-        Option::Some(&oldroot.join("dev")),
-        "/dev",
-        Option::<&str>::None,
-        MsFlags::MS_MOVE,
-        Option::<&str>::None,
-    ) {
-        error!(target:"dev", "mount failed");
-        return Err(SafeEnvError::Mount(e));
-    }
-
-    info!(target:"dev", "mounted");
-
-    if let Err(e) = umount2(&oldroot, MntFlags::MNT_DETACH) {
-        error!(target:"oldroot", "unmount failed");
-        return Err(SafeEnvError::Umount(e));
-    }
-
-    if let Err(e) = fs::remove_dir(oldroot) {
-        error!(target:"oldroot", "remove_dir failed");
-        return Err(SafeEnvError::IOError(e));
-    }
-
-    info!(target:"oldroot", "cleaned");
+    clean_oldrootfs(&oldroot)?;
 
     Ok(())
 }
